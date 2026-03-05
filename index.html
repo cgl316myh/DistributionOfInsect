@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>聚合点智能放大 - V4可配置版</title>
+
+  <!-- ArcGIS Maps SDK for JavaScript -->
+  <link rel="stylesheet" href="https://js.arcgis.com/4.30/esri/themes/light/main.css" />
+  <script src="https://js.arcgis.com/4.30/"></script>
+
+  <style>
+    html,
+    body,
+    #viewDiv {
+      padding: 0;
+      margin: 0;
+      height: 100%;
+      width: 100%;
+    }
+
+    /* 使用说明 - 左上角 */
+    #infoPanel {
+      position: absolute;
+      top: 15px;
+      left: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      font-family: Arial, sans-serif;
+      z-index: 99;
+      max-width: 280px;
+      padding: 12px 15px;
+    }
+
+    #infoPanel h3 {
+      margin: 0 0 8px 0;
+      font-size: 15px;
+      color: #333;
+    }
+
+    #infoPanel p {
+      margin: 4px 0;
+      font-size: 12px;
+      color: #666;
+      line-height: 1.4;
+    }
+
+    /* 控制面板 - 右上角 */
+    #controlPanel {
+      position: absolute;
+      top: 200px;
+      left: 15px;
+      background-color: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      font-family: Arial, sans-serif;
+      z-index: 99;
+      max-width: 340px;
+    }
+
+    .panel-header {
+      background: linear-gradient(135deg, #0066cc, #0099ff);
+      color: white;
+      padding: 12px 15px;
+      border-radius: 8px 8px 0 0;
+      font-weight: bold;
+      font-size: 15px;
+    }
+
+    .panel-body {
+      padding: 15px;
+    }
+
+    .control-group {
+      margin-bottom: 15px;
+    }
+
+    .control-group label {
+      display: block;
+      font-size: 13px;
+      color: #333;
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+
+    .control-group input[type="number"] {
+      width: 80px;
+      padding: 6px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .control-group select {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .info-text {
+      font-size: 12px;
+      color: #666;
+      margin-top: 3px;
+      line-height: 1.4;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: bold;
+      margin-top: 5px;
+    }
+
+    .status-zoom {
+      background: #e3f2fd;
+      color: #1976d2;
+    }
+
+    .status-info {
+      background: #fff3e0;
+      color: #f57c00;
+    }
+
+    .divider {
+      height: 1px;
+      background: #eee;
+      margin: 15px 0;
+    }
+
+    /* Popup 样式 */
+    .feature-item {
+      padding: 10px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .feature-item:hover {
+      background-color: #f0f8ff;
+      padding-left: 15px;
+    }
+
+    .feature-item:last-child {
+      border-bottom: none;
+    }
+
+    .feature-number {
+      display: inline-block;
+      background: #0066cc;
+      color: white;
+      width: 24px;
+      height: 24px;
+      line-height: 24px;
+      text-align: center;
+      border-radius: 50%;
+      font-size: 12px;
+      margin-right: 8px;
+      font-weight: bold;
+    }
+
+    @media (max-width: 768px) {
+      #controlPanel {
+        max-width: calc(100% - 30px);
+        top: auto;
+        bottom: 15px;
+      }
+
+      #infoPanel {
+        max-width: calc(100% - 30px);
+      }
+    }
+  </style>
+
+  <script>
+    require([
+      "esri/WebMap",
+      "esri/views/MapView",
+      "esri/core/reactiveUtils",
+      "esri/geometry/geometryEngine"
+    ], function (WebMap, MapView, reactiveUtils, geometryEngine) {
+
+      // ========================================
+      // ⚙️ 配置参数
+      // ========================================
+      let CONFIG = {
+        maxZoomLevel: 16,        // 最大缩放级别
+        zoomIncrement: 2,        // 每次放大的级别增量
+        animationDuration: 1000, // 动画持续时间（毫秒）
+        extendFactor: 1.5,       // 范围扩展系数
+        maxFeaturesInPopup: 50,  // Popup中最多显示的要素数
+        bufferDistance: 100      // 空间查询缓冲距离（米）
+      };
+
+      // 字段名中英映射词典
+      const fieldNameMap = {
+        "__OBJECTID": "FID",
+        "altitude": "海拔",
+        "物种": "物种",
+        "date": "日期",
+        "family": "科拉丁",
+        "Latitude": "纬度",
+        "location": "地点",
+        "Longitude": "经度",
+        "Species": "属拉丁",
+        "specimen_larvae_": "标本(幼虫)"
+      };
+
+      const webmap = new WebMap({
+        portalItem: {
+          id: "26511f492e34406ca52a152e4cfa332d"
+        }
+      });
+
+      const view = new MapView({
+        container: "viewDiv",
+        map: webmap,
+        popup: {
+          dockEnabled: true,
+          dockOptions: {
+            buttonEnabled: true,
+            breakpoint: false,
+            position: "top-right"
+          }
+        }
+      });
+
+      view.when(function () {
+        console.log("✅ 地图加载完成");
+
+        initControlPanel();
+
+        webmap.layers.forEach(function (layer) {
+          console.log("📂 图层:", layer.title, "| 类型:", layer.type);
+          if (layer.featureReduction && layer.featureReduction.type === "cluster") {
+            console.log("🎯 找到聚合图层:", layer.title);
+            setupClusterClickHandler(layer);
+          }
+        });
+      });
+
+      function initControlPanel() {
+        const maxZoomInput = document.getElementById("maxZoomLevel");
+        const zoomIncrementInput = document.getElementById("zoomIncrement");
+        const bufferInput = document.getElementById("bufferDistance");
+        const behaviorSelect = document.getElementById("behaviorMode");
+
+        maxZoomInput.value = CONFIG.maxZoomLevel;
+        zoomIncrementInput.value = CONFIG.zoomIncrement;
+        bufferInput.value = CONFIG.bufferDistance;
+
+        maxZoomInput.addEventListener("change", function () {
+          CONFIG.maxZoomLevel = parseFloat(this.value);
+          console.log("⚙️ 最大缩放级别设为:", CONFIG.maxZoomLevel);
+          updateStatus();
+        });
+
+        zoomIncrementInput.addEventListener("change", function () {
+          CONFIG.zoomIncrement = parseFloat(this.value);
+          console.log("⚙️ 放大增量设为:", CONFIG.zoomIncrement);
+        });
+
+        bufferInput.addEventListener("change", function () {
+          CONFIG.bufferDistance = parseFloat(this.value);
+          console.log("⚙️ 缓冲距离设为:", CONFIG.bufferDistance, "米");
+        });
+
+        behaviorSelect.addEventListener("change", function () {
+          if (this.value === "always-zoom") {
+            CONFIG.maxZoomLevel = 99;
+          } else if (this.value === "always-info") {
+            CONFIG.maxZoomLevel = 0;
+          } else {
+            CONFIG.maxZoomLevel = parseFloat(maxZoomInput.value);
+          }
+          console.log("⚙️ 行为模式:", this.value);
+          updateStatus();
+        });
+      }
+
+      function updateStatus() {
+        const currentZoom = view.zoom;
+        const statusDiv = document.getElementById("currentStatus");
+
+        if (currentZoom >= CONFIG.maxZoomLevel) {
+          statusDiv.innerHTML = '<span class="status-badge status-info">📋 点击显示详情</span>';
+        } else {
+          statusDiv.innerHTML = '<span class="status-badge status-zoom">🔍 点击放大地图</span>';
+        }
+      }
+
+      function setupClusterClickHandler(layer) {
+        view.on("click", function (event) {
+          view.hitTest(event).then(function (response) {
+            const clusterResult = response.results.find(function (result) {
+              return result.graphic && result.graphic.layer === layer;
+            });
+
+            if (clusterResult) {
+              const graphic = clusterResult.graphic;
+
+              if (graphic.isAggregate) {
+                const clusterCount = graphic.attributes.cluster_count;
+                const currentZoom = view.zoom;
+
+                console.log("📍 点击聚合点 | 包含:", clusterCount, "个要素 | 缩放:", currentZoom.toFixed(2));
+
+                event.stopPropagation();
+
+                if (currentZoom >= CONFIG.maxZoomLevel) {
+                  showClusterInfo(graphic, layer);
+                } else {
+                  zoomToCluster(graphic, layer);
+                }
+              } else {
+                console.log("📌 点击了单个要素");
+                event.stopPropagation();
+                openFeatureWithFooter(graphic, layer, false);
+              }
+            }
+          });
+        });
+
+        view.on("pointer-move", function (event) {
+          view.hitTest(event).then(function (response) {
+            const clusterResult = response.results.find(function (result) {
+              return result.graphic && result.graphic.layer === layer;
+            });
+
+            if (clusterResult) {
+              view.container.style.cursor = "pointer";
+            } else {
+              view.container.style.cursor = "default";
+            }
+          });
+        });
+      }
+
+      // 🔧 V4修复：双重查询策略
+      function showClusterInfo(clusterGraphic, layer) {
+        console.log("🔍 开始查询聚合内的要素...");
+        console.log("聚合点位置:", clusterGraphic.geometry.longitude, clusterGraphic.geometry.latitude);
+        console.log("聚合点声称包含:", clusterGraphic.attributes.cluster_count, "个要素");
+
+        const query1 = layer.createQuery();
+        query1.aggregateIds = [clusterGraphic.getObjectId()];
+
+        layer.queryFeatures(query1).then(function (result) {
+          console.log("📊 方法1 (aggregateIds) 返回:", result.features.length, "个要素");
+
+          const expectedCount = clusterGraphic.attributes.cluster_count;
+
+          if (result.features.length === expectedCount ||
+            (result.features.length > 0 && result.features.length < expectedCount * 2)) {
+            console.log("✅ 使用方法1的结果");
+            displayClusterFeatures(result.features, clusterGraphic, layer);
+          } else {
+            console.log("⚠️ 方法1返回的数量不对，尝试方法2 (空间查询)");
+            queryByGeometry(clusterGraphic, layer);
+          }
+        }).catch(function (error) {
+          console.error("❌ 方法1失败:", error);
+          console.log("尝试方法2 (空间查询)");
+          queryByGeometry(clusterGraphic, layer);
+        });
+      }
+
+      function queryByGeometry(clusterGraphic, layer) {
+        const point = clusterGraphic.geometry;
+        const bufferDistance = CONFIG.bufferDistance;
+
+        console.log("🔍 使用空间查询，缓冲距离:", bufferDistance, "米");
+
+        const query2 = layer.createQuery();
+        query2.geometry = point;
+        query2.distance = bufferDistance;
+        query2.units = "meters";
+        query2.spatialRelationship = "intersects";
+        query2.returnGeometry = true;
+
+        layer.queryFeatures(query2).then(function (result) {
+          console.log("📊 方法2 (空间查询) 返回:", result.features.length, "个要素");
+
+          if (result.features.length > 0) {
+            displayClusterFeatures(result.features, clusterGraphic, layer);
+          } else {
+            view.popup.open({
+              title: "⚠️ 无法加载详细信息",
+              content: "该聚合点包含 " + clusterGraphic.attributes.cluster_count + " 个位置，但无法查询到详细数据。",
+              location: clusterGraphic.geometry
+            });
+          }
+        }).catch(function (error) {
+          console.error("❌ 方法2也失败:", error);
+          view.popup.open({
+            title: "⚠️ 查询失败",
+            content: "无法获取聚合点的详细信息。错误: " + error.message,
+            location: clusterGraphic.geometry
+          });
+        });
+      }
+
+      function displayClusterFeatures(features, clusterGraphic, layer) {
+        console.log("✅ 准备显示", features.length, "个要素");
+        const popupContent = createClusterPopupContent(features, layer);
+        view.popup.open({
+          title: "📍 聚合点详情 (" + features.length + " 个位置)",
+          content: popupContent,
+          location: clusterGraphic.geometry
+        });
+      }
+
+      function formatDateToString(timestamp) {
+        if (!timestamp) return timestamp;
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return timestamp;
+
+        const yyyy = date.getFullYear();
+        const mm = String(date.getMonth() + 1).padStart(2, '0');
+        const dd = String(date.getDate()).padStart(2, '0');
+        const hh = String(date.getHours()).padStart(2, '0');
+        const MM = String(date.getMinutes()).padStart(2, '0');
+
+        return `${yyyy}年${mm}月${dd}日 ${hh}:${MM}`;
+      }
+
+      function createClusterPopupContent(features, layer) {
+        const container = document.createElement("div");
+        container.style.maxHeight = "400px";
+        container.style.overflowY = "auto";
+
+        const summary = document.createElement("div");
+        summary.style.padding = "12px";
+        summary.style.backgroundColor = "#f0f8ff";
+        summary.style.marginBottom = "10px";
+        summary.style.borderRadius = "4px";
+        summary.style.textAlign = "center";
+        summary.innerHTML = "<strong style='font-size: 16px;'>📊 " + features.length + " 个位置</strong>";
+        container.appendChild(summary);
+
+        const displayFeatures = features.slice(0, CONFIG.maxFeaturesInPopup);
+
+        displayFeatures.forEach(function (feature, index) {
+          const item = document.createElement("div");
+          item.className = "feature-item";
+
+          let content = "<span class='feature-number'>" + (index + 1) + "</span>";
+          content += "<strong style='vertical-align: middle;'>位置 " + (index + 1) + "</strong><br>";
+
+          const attrs = feature.attributes;
+          let attrCount = 0;
+          for (let key in attrs) {
+            if (attrs.hasOwnProperty(key) &&
+              key !== "OBJECTID" &&
+              key !== "__OBJECTID" &&
+              key !== "Shape" &&
+              key !== "FID" &&
+              attrs[key] !== null &&
+              attrs[key] !== undefined &&
+              attrs[key] !== "") {
+              const displayKey = fieldNameMap[key] || key;
+              let displayValue = attrs[key];
+              if (key === "date") displayValue = formatDateToString(displayValue);
+
+              content += "<small>" + displayKey + ": " + displayValue + "</small><br>";
+              attrCount++;
+              if (attrCount >= 3) break;
+            }
+          }
+
+          if (feature.geometry) {
+            content += "<small style='color: #999;'>📍 " +
+              feature.geometry.longitude.toFixed(5) + ", " +
+              feature.geometry.latitude.toFixed(5) + "</small>";
+          }
+
+          item.innerHTML = content;
+          item.addEventListener("click", function () {
+            highlightFeature(feature, layer);
+          });
+
+          container.appendChild(item);
+        });
+
+        if (features.length > CONFIG.maxFeaturesInPopup) {
+          const more = document.createElement("div");
+          more.style.padding = "10px";
+          more.style.textAlign = "center";
+          more.style.color = "#999";
+          more.innerHTML = "... 还有 " + (features.length - CONFIG.maxFeaturesInPopup) + " 个位置";
+          container.appendChild(more);
+        }
+
+        return container;
+      }
+
+      function highlightFeature(feature, layer) {
+        openFeatureWithFooter(feature, layer, true);
+      }
+
+      function openFeatureWithFooter(feature, layer, shouldZoom) {
+        const doOpenPopup = function () {
+          const displayFeature = feature.clone();
+          displayFeature.layer = layer;
+
+          if (layer && layer.popupTemplate) {
+            const customTemplate = layer.popupTemplate.clone();
+
+            // 1. 修改标题，添加 📍 图标
+            if (typeof customTemplate.title === 'string' && !customTemplate.title.includes("📍")) {
+              customTemplate.title = "📍 " + customTemplate.title;
+            } else if (!customTemplate.title) {
+              customTemplate.title = "📍 位置详情";
+            }
+
+            const lon = (displayFeature.geometry && displayFeature.geometry.longitude) ? displayFeature.geometry.longitude : 0;
+            const lat = (displayFeature.geometry && displayFeature.geometry.latitude) ? displayFeature.geometry.latitude : 0;
+
+            // 度分秒转换函数
+            function toDMS(d, isLat) {
+              const dir = isLat ? (d >= 0 ? "N" : "S") : (d >= 0 ? "E" : "W");
+              const absD = Math.abs(d);
+              const deg = Math.floor(absD);
+              const minFloat = (absD - deg) * 60;
+              const min = Math.floor(minFloat);
+              const sec = ((minFloat - min) * 60).toFixed(2);
+              // 根据用户截图中纬度使用了单引号代替度数符号的特例，如果后续发现都需要标准符号，可以统一为'°'
+              const degSymbol = isLat ? "'" : "°";
+              return deg + degSymbol + min + "'" + sec + '"' + dir;
+            }
+
+            const dmsStr = toDMS(lat, true) + ", " + toDMS(lon, false);
+
+            // 2. 将格式化后的经纬度注入到临时属性字典中
+            if (!displayFeature.attributes) {
+              displayFeature.attributes = {};
+            }
+            displayFeature.attributes["custom_dms_coord"] = dmsStr;
+
+            const coordStr = "<div style='margin-top: 10px; padding-top: 10px; border-top: 2px solid #0066cc; font-size: 12px; color: #999;'>" +
+              "<strong>📍 坐标位置</strong><br>" +
+              "经度: " + lon.toFixed(6) + "<br>" +
+              "纬度: " + lat.toFixed(6) +
+              "</div>";
+
+            let tempContent = customTemplate.content;
+
+            // 3. 将新字段信息推入字段列表显示区，以实现“【纬度,经度】”的键值对展示
+            let hasFields = false;
+            if (Array.isArray(tempContent)) {
+              for (let i = 0; i < tempContent.length; i++) {
+                if (tempContent[i] && tempContent[i].type === "fields" && tempContent[i].fieldInfos) {
+                  // 克隆 fieldInfos，避免污染原图层配置
+                  const clonedFieldInfos = tempContent[i].fieldInfos.slice();
+                  clonedFieldInfos.push({
+                    fieldName: "custom_dms_coord",
+                    label: "纬度,经度",
+                    visible: true
+                  });
+                  tempContent[i].fieldInfos = clonedFieldInfos;
+                  hasFields = true;
+                  break;
+                }
+              }
+            }
+
+            if (Array.isArray(tempContent)) {
+              const newContent = tempContent.slice();
+              newContent.push({
+                type: "text",
+                text: coordStr
+              });
+              customTemplate.content = newContent;
+            } else if (typeof tempContent === "string") {
+              const injectStr = hasFields ? "" : "<div><strong>纬度,经度:</strong> " + dmsStr + "</div>";
+              customTemplate.content = tempContent + injectStr + coordStr;
+            } else {
+              customTemplate.content = [{ type: "fields", fieldInfos: [{ fieldName: "custom_dms_coord", label: "纬度,经度" }] }, { type: "text", text: coordStr }];
+            }
+
+            displayFeature.popupTemplate = customTemplate;
+          }
+
+          view.popup.open({
+            features: [displayFeature],
+            location: displayFeature.geometry || (feature.geometry ? feature.geometry : null)
+          });
+        };
+
+        if (shouldZoom && feature.geometry) {
+          view.goTo({
+            center: feature.geometry,
+            zoom: Math.max(view.zoom, 18),
+            duration: 800
+          }).then(function () {
+            view.popup.close();
+            setTimeout(doOpenPopup, 500);
+          });
+        } else {
+          doOpenPopup();
+        }
+      }
+
+      function zoomToCluster(clusterGraphic, layer) {
+        const query = layer.createQuery();
+        query.aggregateIds = [clusterGraphic.getObjectId()];
+
+        layer.queryFeatures(query).then(function (result) {
+          console.log("📊 放大：聚合点包含", result.features.length, "个要素");
+
+          if (result.features.length > 0) {
+            let extent = null;
+            result.features.forEach(function (feature) {
+              if (feature.geometry) {
+                if (!extent) {
+                  extent = feature.geometry.extent.clone();
+                } else {
+                  extent = extent.union(feature.geometry.extent);
+                }
+              }
+            });
+
+            if (extent) {
+              extent = extent.expand(CONFIG.extendFactor);
+              view.goTo({
+                target: extent,
+                duration: CONFIG.animationDuration
+              }).catch(function (error) {
+                if (error.name !== "AbortError") {
+                  console.error("❌ 放大失败:", error);
+                }
+              });
+            }
+          }
+        }).catch(function (error) {
+          console.error("❌ 查询聚合要素失败:", error);
+          if (clusterGraphic.geometry) {
+            view.goTo({
+              center: clusterGraphic.geometry,
+              zoom: view.zoom + CONFIG.zoomIncrement,
+              duration: CONFIG.animationDuration
+            });
+          }
+        });
+      }
+
+      reactiveUtils.watch(
+        () => view.zoom,
+        (zoom) => {
+          document.getElementById("currentZoom").textContent = zoom.toFixed(1);
+          updateStatus();
+        }
+      );
+    });
+  </script>
+</head>
+
+<body>
+  <div id="viewDiv"></div>
+
+  <!-- 使用说明 - 左上角 -->
+  <div id="infoPanel">
+    <h3>🎯 使用说明</h3>
+    <p>• 点击聚合数字可放大地图</p>
+    <p>• 到达缩放级别后显示详情</p>
+    <p>• 点击列表项查看该位置详情</p>
+    <p>• 点击单个点显示该点详情</p>
+  </div>
+
+  <!-- 控制面板 - 右上角 -->
+  <div id="controlPanel">
+    <div class="panel-header">
+      ⚙️ 参数配置 - V4
+    </div>
+    <div class="panel-body">
+      <div class="control-group">
+        <label>当前缩放级别</label>
+        <div style="font-size: 20px; font-weight: bold; color: #0066cc;">
+          <span id="currentZoom">--</span>
+        </div>
+        <div id="currentStatus" style="margin-top: 5px;">
+          <span class="status-badge status-zoom">🔍 点击放大地图</span>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="control-group">
+        <label>行为模式</label>
+        <select id="behaviorMode">
+          <option value="smart">智能模式（推荐）</option>
+          <option value="always-zoom">总是放大</option>
+          <option value="always-info">总是显示信息</option>
+        </select>
+        <div class="info-text">
+          智能模式：到达指定级别后显示信息
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>最大缩放级别（智能模式）</label>
+        <input type="number" id="maxZoomLevel" min="10" max="20" step="0.5" value="16">
+        <div class="info-text">
+          超过此级别后，点击显示详情
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>每次放大级别</label>
+        <input type="number" id="zoomIncrement" min="1" max="5" step="0.5" value="2">
+        <div class="info-text">
+          点击聚合点时，地图放大的级数
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label>空间查询缓冲距离（米）</label>
+        <input type="number" id="bufferDistance" min="50" max="1000" step="50" value="100">
+        <div class="info-text">
+          用于聚合点查询的缓冲区半径
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="info-text" style="margin: 0;">
+        💡 <strong>V4新特性：</strong>双重查询策略确保显示正确数量
+      </div>
+    </div>
+  </div>
+</body>
+
+</html>
