@@ -200,15 +200,15 @@
       // 字段名中英映射词典
       const fieldNameMap = {
         "__OBJECTID": "FID",
-        "altitude": "海拔",
-        "物种": "物种",
-        "date": "日期",
-        "family": "科拉丁",
-        "Latitude": "纬度",
-        "location": "地点",
-        "Longitude": "经度",
-        "Species": "属拉丁",
-        "specimen_larvae_": "标本(幼虫)"
+        "altitude": "海拔（Altitude）",
+        "物种": "物种（Species）",
+        "date": "日期（Date）",
+        "family": "科拉丁（Family (Latin)）",
+        "Latitude": "纬度（Latitude）",
+        "location": "地点（Location）",
+        "Longitude": "经度（Longitude）",
+        "Species": "属拉丁（Genus (Latin)）",
+        "specimen_larvae_": "标本（幼虫）（Specimen (Larva)）"
       };
 
       const webmap = new WebMap({
@@ -460,6 +460,7 @@
               key !== "__OBJECTID" &&
               key !== "Shape" &&
               key !== "FID" &&
+              key !== "date" &&
               attrs[key] !== null &&
               attrs[key] !== undefined &&
               attrs[key] !== "") {
@@ -544,8 +545,8 @@
 
             const coordStr = "<div style='margin-top: 10px; padding-top: 10px; border-top: 2px solid #0066cc; font-size: 12px; color: #999;'>" +
               "<strong>📍 坐标位置</strong><br>" +
-              "经度: " + lon.toFixed(6) + "<br>" +
-              "纬度: " + lat.toFixed(6) +
+              "经度（Longitude）: " + lon.toFixed(6) + "<br>" +
+              "纬度（Latitude）: " + lat.toFixed(6) +
               "</div>";
 
             let tempContent = customTemplate.content;
@@ -557,9 +558,22 @@
                 if (tempContent[i] && tempContent[i].type === "fields" && tempContent[i].fieldInfos) {
                   // 克隆 fieldInfos，避免污染原图层配置
                   const clonedFieldInfos = tempContent[i].fieldInfos.slice();
+
+                  // 强制不显示日期字段，同时替换其它字段为中英对照
+                  clonedFieldInfos.forEach(f => {
+                    if (f.fieldName === "date" || f.label === "日期") {
+                      f.visible = false;
+                    }
+                    if (fieldNameMap[f.fieldName]) {
+                      f.label = fieldNameMap[f.fieldName];
+                    } else if (f.label && fieldNameMap[f.label]) {
+                      f.label = fieldNameMap[f.label];
+                    }
+                  });
+
                   clonedFieldInfos.push({
                     fieldName: "custom_dms_coord",
-                    label: "纬度,经度",
+                    label: "纬度，经度（Latitude, Longitude）",
                     visible: true
                   });
                   tempContent[i].fieldInfos = clonedFieldInfos;
@@ -577,10 +591,10 @@
               });
               customTemplate.content = newContent;
             } else if (typeof tempContent === "string") {
-              const injectStr = hasFields ? "" : "<div><strong>纬度,经度:</strong> " + dmsStr + "</div>";
+              const injectStr = hasFields ? "" : "<div><strong>纬度，经度（Latitude, Longitude）:</strong> " + dmsStr + "</div>";
               customTemplate.content = tempContent + injectStr + coordStr;
             } else {
-              customTemplate.content = [{ type: "fields", fieldInfos: [{ fieldName: "custom_dms_coord", label: "纬度,经度" }] }, { type: "text", text: coordStr }];
+              customTemplate.content = [{ type: "fields", fieldInfos: [{ fieldName: "custom_dms_coord", label: "纬度，经度（Latitude, Longitude）" }] }, { type: "text", text: coordStr }];
             }
 
             displayFeature.popupTemplate = customTemplate;
